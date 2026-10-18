@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(terraform fmt:*)",
+      "Bash(terraform validate:*)",
+      "Bash(terraform init -backend=false:*)",
+      "Bash(dbt parse:*)",
+      "Bash(dbt compile:*)",
+      "Bash(dbt deps:*)",
+      "Bash(pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(shellcheck:*)",
+      "Bash(sqlfluff:*)",
+      "Bash(tflint:*)",
+      "Bash(checkov:*)",
+      "Bash(pre-commit run:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)"
+    ],
+    "deny": [
+      "Bash(terraform apply:*)",
+      "Bash(terraform destroy:*)",
+      "Bash(terraform import:*)",
+      "Bash(terraform state:*)",
+      "Bash(dbt run:*)",
+      "Bash(dbt build:*)",
+      "Bash(dbt seed:*)",
+      "Bash(dbt snapshot:*)",
+      "Bash(snow:*)",
+      "Bash(az:*)",
+      "Bash(git push:*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/*.p8)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.tfstate)",
+      "Read(./**/*.tfvars)"
+    ]
+  }
+}

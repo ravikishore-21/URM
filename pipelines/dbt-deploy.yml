@@ -1,0 +1,172 @@
+# Deploys dbt on merge to dev or test when files under dbt/ change.
+# Only modified models and their children are built (state:modified+). With no saved
+# state (first run) everything is built. The manifest is uploaded only after a green build.
+#
+# Order: validate (deps, parse, compile) -> fetch state -> back up -> build -> upload manifest.
+# If the build fails, the Revert stage opens a revert PR (never merged) and notifies Teams.
+# batch: true runs one deployment per branch at a time; merges that arrive meanwhile wait and are
+# built together, so two runs never race on dbt build or on the manifest upload.
+trigger:
+  batch: true
+  branches:
+    include: [dev, test]
+  paths:
+    include: [dbt/*]
+pr: none
+
+parameters:
+  # A missing manifest normally means the state stage was lost, not a first deploy, and a full
+  # build would rebuild every model. Tick this only for the very first deploy of an environment.
+  - name: allowFullBuild
+    displayName: Allow a full build when no dbt state exists (first deploy only)
+    type: boolean
+    default: false
+
+pool:
+  vmImage: ubuntu-24.04
+
+variables:
+  - template: templates/variables.yml
+    parameters:
+      branch: ${{ replace(variables['Build.SourceBranch'], 'refs/heads/', '') }}
+
+stages:
+  - stage: Deploy
+    displayName: dbt deploy
+    jobs:
+      - job: dbt_deploy
+        displayName: dbt deploy
+        steps:
+          - checkout: self
+            displayName: Checkout
+          - template: templates/install-python-tools.yml
+          - template: templates/download-snowflake-key.yml
+          - template: templates/dbt-script-step.yml
+            parameters:
+              displayName: Validate project (dbt deps, parse, compile)
+              script: |
+                set -euo pipefail
+                cd dbt
+                dbt deps
+                dbt parse --target "${TARGET_ENV}"
+                dbt compile --target "${TARGET_ENV}"
+          - template: templates/dbt-script-step.yml
+            parameters:
+              allowFullBuild: ${{ parameters.allowFullBuild }}
+              displayName: Fetch state and back up changed tables
+              script: |
+                set -euo pipefail
+                cd dbt
+                rc=0
+                bash ./scripts/fetch_state.sh "${TARGET_ENV}" || rc=$?
+                case "${rc}" in
+                  0)  SELECT_ARGS=(--select "state:modified+" --state ./state) ;;
+                  10)
+                    if [[ "${ALLOW_FULL_BUILD,,}" != "true" ]]; then
+                      echo "No dbt state for ${TARGET_ENV}. Refusing a full build; re-run with allowFullBuild=true if this is the first deploy."
+                      exit 1
+                    fi
+                    echo "No state for ${TARGET_ENV} yet: full build (allowed by allowFullBuild)"; SELECT_ARGS=() ;;
+                  *)  echo "fetch_state.sh failed with exit code ${rc}"; exit "${rc}" ;;
+                esac
+                # target/manifest.json comes from the validate step, so it matches the code being
+                # deployed. A backup failure stops the job (set -e) before anything is built.
+                dbt ls --target "${TARGET_ENV}" "${SELECT_ARGS[@]}" \
+                  --resource-type model --output name > changed_models.txt
+                # Azure Repos merge commits read "Merged PR 123: title"; no match leaves it unset.
+                if [[ "${COMMIT_MESSAGE}" =~ ^Merged\ PR\ ([0-9]+): ]]; then
+                  export PR_NUMBER="${BASH_REMATCH[1]}"
+                fi
+                # With a state manifest, a previously deployed table that cannot be seen stops the
+                # backup (and so the deploy) instead of being replaced without a backup.
+                BACKUP_ARGS=()
+                if [[ -s state/manifest.json ]]; then
+                  BACKUP_ARGS=(--state-manifest state/manifest.json)
+                fi
+                python scripts/backup.py changed_models.txt --manifest target/manifest.json "${BACKUP_ARGS[@]}"
+          # The Revert stage reads these two markers: a revert PR is opened only when the build
+          # started (mark_build) and did not finish (no mark_done). Failures before the build
+          # deployed nothing, so there is nothing to revert.
+          - script: echo "##vso[task.setvariable variable=DEPLOY_PHASE;isOutput=true]build"
+            name: mark_build
+            displayName: Mark build started
+          - template: templates/dbt-script-step.yml
+            parameters:
+              allowFullBuild: ${{ parameters.allowFullBuild }}
+              displayName: Deploy changed models (dbt build)
+              script: |
+                set -euo pipefail
+                cd dbt
+                if [[ -s state/manifest.json ]]; then
+                  SELECT_ARGS=(--select "state:modified+" --state ./state)
+                else
+                  SELECT_ARGS=()
+                fi
+                dbt build --target "${TARGET_ENV}" "${SELECT_ARGS[@]}"
+          - script: echo "##vso[task.setvariable variable=DEPLOY_PHASE;isOutput=true]deployed"
+            name: mark_done
+            displayName: Mark build finished
+          # Default condition (succeeded): skipped when anything above failed, so a failed
+          # deployment never replaces the last good state.
+          - template: templates/dbt-script-step.yml
+            parameters:
+              displayName: Upload manifest (state for the next run)
+              script: |
+                set -euo pipefail
+                cd dbt
+                bash ./scripts/upload_state.sh "${TARGET_ENV}"
+
+  - stage: Revert
+    displayName: Revert PR and notify
+    dependsOn: Deploy
+    condition: failed()
+    jobs:
+      - job: create_revert
+        displayName: Create revert PR and notify
+        variables:
+          BUILD_STARTED: $[ stageDependencies.Deploy.dbt_deploy.outputs['mark_build.DEPLOY_PHASE'] ]
+          BUILD_DONE: $[ stageDependencies.Deploy.dbt_deploy.outputs['mark_done.DEPLOY_PHASE'] ]
+        steps:
+          - checkout: self
+            displayName: Checkout full history
+            fetchDepth: 0
+            persistCredentials: false
+          - script: |
+              set -euo pipefail
+              az extension add --name azure-devops --version 1.0.2 --only-show-errors
+              bash pipelines/scripts/create_revert_pr.sh \
+                --branch "${SOURCE_BRANCH}" \
+                --sha "${COMMIT_SHA}" \
+                --output-file "${RESULT_FILE}"
+            displayName: Create revert branch and PR (not merged)
+            condition: and(succeeded(), eq(variables['BUILD_STARTED'], 'build'), ne(variables['BUILD_DONE'], 'deployed'))
+            env:
+              SOURCE_BRANCH: $(TARGET_ENV)
+              COMMIT_SHA: $(Build.SourceVersion)
+              RESULT_FILE: $(Agent.TempDirectory)/revert_result.env
+              RUN_ID: $(Build.BuildId)
+              GIT_BOT_NAME: $(GIT_BOT_NAME)
+              GIT_BOT_EMAIL: $(GIT_BOT_EMAIL)
+              GIT_AUTH_TOKEN: $(System.AccessToken)
+              AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)
+              ORG_URL: $(System.CollectionUri)
+              PROJECT: $(System.TeamProject)
+              REPO_NAME: $(Build.Repository.Name)
+          - script: |
+              set -euo pipefail
+              bash pipelines/scripts/notify_teams.sh \
+                --run-url "${RUN_URL}" \
+                --env "${TARGET_ENV}" \
+                --branch "${SOURCE_BRANCH}" \
+                --sha "${COMMIT_SHA}" \
+                --revert-file "${RESULT_FILE}"
+            displayName: Notify Teams of failed deployment
+            condition: always()
+            env:
+              RUN_URL: $(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+              TARGET_ENV: $(TARGET_ENV)
+              SOURCE_BRANCH: $(TARGET_ENV)
+              COMMIT_SHA: $(Build.SourceVersion)
+              RESULT_FILE: $(Agent.TempDirectory)/revert_result.env
+              RUN_ID: $(Build.BuildId)
+              TEAMS_WEBHOOK_URL: $(TEAMS_WEBHOOK_URL)

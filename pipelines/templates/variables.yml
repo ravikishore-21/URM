@@ -1,0 +1,16 @@
+# Selects the Snowflake variable group and target environment from a branch name.
+# Branch dev -> group snowflake-dev, target dev; branch test -> snowflake-test, target test.
+#
+# `branch` must be the FULL branch name (for example dev, never the last path segment of
+# feature/dev) and is limited to the values below, so a run from any other branch fails when the
+# pipeline is compiled, before any step or credential is touched. Add stage/prod here together
+# with the approval gates (open-questions J, question 4).
+parameters:
+  - name: branch
+    type: string
+    values: [dev, test]
+
+variables:
+  - group: snowflake-${{ parameters.branch }}
+  - name: TARGET_ENV
+    value: ${{ parameters.branch }}

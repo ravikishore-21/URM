@@ -1,0 +1,35 @@
+# Installs the pinned Python toolchain in two virtual environments (open-questions C):
+#   .venv      dbt + connector + linters     from requirements.txt
+#   .venv-cli  Snowflake CLI (`snow`)        from requirements-cli.txt
+# They stay apart because snowflake-cli pins click/protobuf versions that conflict with dbt-core.
+# After this step `dbt` and `python` come from .venv, and SNOW_BIN points at .venv-cli's snow.
+parameters:
+  - name: pythonVersion
+    type: string
+    default: '3.11'
+  - name: requirementsFile
+    type: string
+    default: requirements.txt
+  - name: cliRequirementsFile
+    type: string
+    default: requirements-cli.txt
+
+steps:
+  - task: UsePythonVersion@0
+    displayName: Use Python ${{ parameters.pythonVersion }}
+    inputs:
+      versionSpec: ${{ parameters.pythonVersion }}
+  - script: |
+      set -euo pipefail
+      python -m venv .venv
+      .venv/bin/pip install --quiet --disable-pip-version-check -r "${REQ_FILE}"
+      python -m venv .venv-cli
+      .venv-cli/bin/pip install --quiet --disable-pip-version-check -r "${CLI_REQ_FILE}"
+      echo "##vso[task.prependpath]${PWD}/.venv/bin"
+      echo "##vso[task.setvariable variable=SNOW_BIN]${PWD}/.venv-cli/bin/snow"
+      .venv/bin/dbt --version
+      .venv-cli/bin/snow --version
+    displayName: Install Python tools (pinned)
+    env:
+      REQ_FILE: ${{ parameters.requirementsFile }}
+      CLI_REQ_FILE: ${{ parameters.cliRequirementsFile }}

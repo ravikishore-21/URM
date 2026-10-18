@@ -1,0 +1,7 @@
+id,customer_id,order_date,status,amount
+1,1,2026-01-05,completed,120.50
+2,1,2026-02-11,completed,80.00
+3,2,2026-02-14,returned,45.25
+4,3,2026-03-01,completed,300.00
+5,3,2026-03-20,placed,60.75
+6,4,2026-04-02,completed,15.00

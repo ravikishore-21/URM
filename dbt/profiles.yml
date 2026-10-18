@@ -1,0 +1,20 @@
+# No credentials in Git. Every value comes from an environment variable.
+# Pipelines set them from the Azure DevOps variable group and the Secure File key.
+snowflake:
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+  outputs:
+    dev: &defaults
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_KEY_PATH') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
+      schema: ANALYTICS
+      threads: 8
+    test:
+      <<: *defaults
+    ci:
+      <<: *defaults
+      schema: "CI_PR_{{ env_var('PR_NUMBER', '0') }}"

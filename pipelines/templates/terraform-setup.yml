@@ -1,0 +1,10 @@
+# Installs the pinned Terraform toolchain (Terraform, tflint, checkov) on the agent.
+# Versions and SHA256 checksums live in pipelines/scripts/install_tf_tools.sh, one place only.
+# After this step `terraform`, `tflint` and `checkov` are on PATH.
+steps:
+  - script: |
+      set -euo pipefail
+      bash pipelines/scripts/install_tf_tools.sh
+    displayName: Install Terraform tools (pinned, checksum verified)
+    env:
+      RUN_ID: $(Build.BuildId)

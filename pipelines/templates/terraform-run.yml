@@ -1,0 +1,62 @@
+# Runs `pipelines/scripts/tf.sh <command> <env>` signed in to Azure for the state backend.
+#
+# Needs an Azure Resource Manager service connection that uses workload identity federation
+# (OIDC, no stored secret) and holds "Storage Blob Data Contributor" on the state container.
+# The Terraform user's private key must be downloaded earlier in the job (download-snowflake-key.yml
+# with secureFile set to the Terraform key, step name sfkey).
+# Variable group values used: TFSTATE_*, SNOWFLAKE_ORGANIZATION_NAME, SNOWFLAKE_ACCOUNT_NAME,
+# SNOWFLAKE_TF_USER, TF_DEPLOYER_USERS (see docs/azure-devops-setup.md).
+parameters:
+  - name: command
+    type: string
+    values: [plan, apply]
+  - name: environment
+    type: string
+  - name: azureServiceConnection
+    type: string
+  - name: displayName
+    type: string
+  # Snowflake identity. Default: the apply identity. PR plans pass a read-only one.
+  - name: tfUser
+    type: string
+    default: $(SNOWFLAKE_TF_USER)
+  - name: objectsRole
+    type: string
+    default: ''
+  - name: securityRole
+    type: string
+    default: ''
+
+steps:
+  - task: AzureCLI@2
+    displayName: ${{ parameters.displayName }}
+    inputs:
+      azureSubscription: ${{ parameters.azureServiceConnection }}
+      scriptType: bash
+      scriptLocation: inlineScript
+      addSpnToEnvironment: true
+      workingDirectory: $(Build.SourcesDirectory)
+      inlineScript: |
+        set -euo pipefail
+        export ARM_USE_OIDC=true
+        export ARM_CLIENT_ID="${servicePrincipalId}"
+        export ARM_TENANT_ID="${tenantId}"
+        export ARM_OIDC_TOKEN="${idToken}"
+        ARM_SUBSCRIPTION_ID="$(az account show --query id --output tsv)"
+        export ARM_SUBSCRIPTION_ID
+        bash pipelines/scripts/tf.sh "${TF_COMMAND}" "${TF_ENV}"
+    env:
+      TF_COMMAND: ${{ parameters.command }}
+      TF_ENV: ${{ parameters.environment }}
+      RUN_ID: $(Build.BuildId)
+      PR_NUMBER: $(System.PullRequest.PullRequestId)
+      TFSTATE_RESOURCE_GROUP: $(TFSTATE_RESOURCE_GROUP)
+      TFSTATE_STORAGE_ACCOUNT: $(TFSTATE_STORAGE_ACCOUNT)
+      TFSTATE_CONTAINER: $(TFSTATE_CONTAINER)
+      SNOWFLAKE_ORGANIZATION_NAME: $(SNOWFLAKE_ORGANIZATION_NAME)
+      SNOWFLAKE_ACCOUNT_NAME: $(SNOWFLAKE_ACCOUNT_NAME)
+      SNOWFLAKE_TF_USER: ${{ parameters.tfUser }}
+      TF_OBJECTS_ROLE: ${{ parameters.objectsRole }}
+      TF_SECURITY_ROLE: ${{ parameters.securityRole }}
+      SNOWFLAKE_KEY_PATH: $(sfkey.secureFilePath)
+      TF_DEPLOYER_USERS: $(TF_DEPLOYER_USERS)

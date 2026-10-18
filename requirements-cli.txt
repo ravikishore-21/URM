@@ -1,0 +1,4 @@
+# Snowflake CLI (`snow`). Install in its own virtual environment, never together
+# with requirements.txt: it pins click==8.1.8 and protobuf<6, dbt-core needs
+# click>=8.3 and protobuf>=6.
+snowflake-cli==3.29.0

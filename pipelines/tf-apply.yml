@@ -1,0 +1,96 @@
+# Terraform apply on merge to dev or test when files under terraform/ change.
+#
+# Plan stage: checks and `plan -out`. The saved plan travels to the Apply stage as a pipeline
+# artifact. Apply stage: a deployment job on the Azure DevOps Environment snowflake-<env>, so
+# approvals and checks configured on that Environment gate the apply. dev and test have no
+# approval; STAGE and PROD Environments get a required approver (docs/azure-devops-setup.md).
+# `terraform apply tfplan` applies exactly what was planned, and fails if the state changed since.
+#
+# The binary plan holds the private key (Terraform stores variable values in it). The artifact is
+# short-lived and only this pipeline's readers can open it; see docs/implementation-guide.md.
+# batch: true runs one apply per branch at a time (the saved plan is also refused if state moved).
+trigger:
+  batch: true
+  branches:
+    include: [dev, test]
+  paths:
+    include: [terraform/*]
+pr: none
+
+pool:
+  vmImage: ubuntu-24.04
+
+variables:
+  - template: templates/variables.yml
+    parameters:
+      branch: ${{ replace(variables['Build.SourceBranch'], 'refs/heads/', '') }}
+
+stages:
+  - stage: Plan
+    displayName: Terraform plan
+    jobs:
+      - job: tf_plan
+        displayName: Checks and saved plan
+        steps:
+          - checkout: self
+            displayName: Checkout
+          - template: templates/terraform-setup.yml
+          - script: |
+              set -euo pipefail
+              bash pipelines/scripts/tf.sh checks
+            displayName: Terraform fmt, validate, tflint, checkov
+            env:
+              RUN_ID: $(Build.BuildId)
+          - template: templates/download-snowflake-key.yml
+            parameters:
+              secureFile: snowflake_tf_key.p8
+          - template: templates/terraform-run.yml
+            parameters:
+              command: plan
+              environment: $(TARGET_ENV)
+              azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+              displayName: Terraform init and plan
+          - script: |
+              set -euo pipefail
+              echo "##vso[task.uploadsummary]${PWD}/plan-output/plan-${TARGET_ENV}.md"
+            displayName: Show plan in the run summary
+            env:
+              TARGET_ENV: $(TARGET_ENV)
+          - task: PublishPipelineArtifact@1
+            displayName: Publish saved plan for the Apply stage
+            inputs:
+              targetPath: $(Build.SourcesDirectory)/terraform/envs/$(TARGET_ENV)/tfplan
+              artifact: tfplan-$(TARGET_ENV)
+
+  - stage: Apply
+    displayName: Terraform apply
+    dependsOn: Plan
+    jobs:
+      - deployment: tf_apply
+        displayName: Apply saved plan
+        environment: snowflake-${{ replace(variables['Build.SourceBranch'], 'refs/heads/', '') }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                  displayName: Checkout
+                - template: templates/terraform-setup.yml
+                - download: current
+                  displayName: Download saved plan
+                  artifact: tfplan-$(TARGET_ENV)
+                - script: |
+                    set -euo pipefail
+                    cp "$(Pipeline.Workspace)/tfplan-${TARGET_ENV}/tfplan" "terraform/envs/${TARGET_ENV}/tfplan"
+                  displayName: Place saved plan in the environment folder
+                  env:
+                    TARGET_ENV: $(TARGET_ENV)
+                - template: templates/download-snowflake-key.yml
+                  parameters:
+                    secureFile: snowflake_tf_key.p8
+                - template: templates/terraform-run.yml
+                  parameters:
+                    command: apply
+                    environment: $(TARGET_ENV)
+                    azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+                    displayName: Terraform init and apply saved plan

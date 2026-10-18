@@ -1,0 +1,15 @@
+# Downloads the Snowflake CI private key from Pipelines > Library > Secure files.
+# The file must be uploaded and the pipeline authorized to use it (docs/azure-devops-setup.md).
+# Later steps in the same job read the path as $(sfkey.secureFilePath) and pass it
+# to scripts as SNOWFLAKE_KEY_PATH through env:, never on the command line.
+parameters:
+  - name: secureFile
+    type: string
+    default: snowflake_ci_key.p8
+
+steps:
+  - task: DownloadSecureFile@1
+    name: sfkey
+    displayName: Download Snowflake CI key
+    inputs:
+      secureFile: ${{ parameters.secureFile }}

@@ -1,0 +1,69 @@
+# Terraform plan on PRs. Runs through a build validation policy on dev/test with path
+# filter /terraform/* (Azure Repos ignores the YAML pr: trigger). See docs/azure-devops-setup.md.
+#
+# PR builds run unreviewed code, so the plan uses its own identity (SNOWFLAKE_TF_PLAN_USER, key
+# snowflake_tf_plan_key.p8, roles TF_PLAN_*_ROLE) with read-only roles, never the apply identity.
+# Checks run first and need no credentials. The plan job runs only if they pass. Only the
+# plan as TEXT is published: the binary plan file contains the private key and stays on the agent.
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-24.04
+
+variables:
+  - template: templates/variables.yml
+    parameters:
+      # PR target branch; falls back to dev for manual runs.
+      branch: ${{ replace(coalesce(variables['System.PullRequest.TargetBranch'], 'refs/heads/dev'), 'refs/heads/', '') }}
+
+stages:
+  - stage: Validate
+    displayName: Terraform checks
+    jobs:
+      - job: tf_checks
+        displayName: fmt, validate, tflint, checkov
+        steps:
+          - checkout: self
+            displayName: Checkout
+          - template: templates/terraform-setup.yml
+          - script: |
+              set -euo pipefail
+              bash pipelines/scripts/tf.sh checks
+            displayName: Terraform fmt, validate, tflint, checkov
+            env:
+              RUN_ID: $(Build.BuildId)
+
+  - stage: Plan
+    displayName: Terraform plan
+    dependsOn: Validate
+    jobs:
+      - job: tf_plan
+        displayName: Terraform plan
+        steps:
+          - checkout: self
+            displayName: Checkout
+          - template: templates/terraform-setup.yml
+          - template: templates/download-snowflake-key.yml
+            parameters:
+              secureFile: snowflake_tf_plan_key.p8
+          - template: templates/terraform-run.yml
+            parameters:
+              command: plan
+              environment: $(TARGET_ENV)
+              azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+              tfUser: $(SNOWFLAKE_TF_PLAN_USER)
+              objectsRole: $(TF_PLAN_OBJECTS_ROLE)
+              securityRole: $(TF_PLAN_SECURITY_ROLE)
+              displayName: Terraform init and plan
+          - script: |
+              set -euo pipefail
+              echo "##vso[task.uploadsummary]${PWD}/plan-output/plan-${TARGET_ENV}.md"
+            displayName: Show plan in the run summary
+            env:
+              TARGET_ENV: $(TARGET_ENV)
+          - task: PublishPipelineArtifact@1
+            displayName: Publish plan (text only)
+            inputs:
+              targetPath: $(Build.SourcesDirectory)/plan-output
+              artifact: terraform-plan-$(TARGET_ENV)

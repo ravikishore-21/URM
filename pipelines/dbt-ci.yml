@@ -1,0 +1,78 @@
+# PR check for dbt. Runs through a build validation policy on dev/test with path
+# filter /dbt/* (Azure Repos ignores the YAML pr: trigger). See docs/azure-devops-setup.md.
+#
+# PR builds run code from the PR branch BEFORE review, so they never use the deploy identity: they
+# sign in as SNOWFLAKE_PR_USER / SNOWFLAKE_PR_ROLE with the secure file snowflake_pr_key.p8. That role
+# may create and drop CI_PR_* schemas and read the target database, nothing else
+# (docs/azure-devops-setup.md). If the variables are missing the run fails; it never falls back.
+#
+# Builds only new/changed models (state:modified+) into a temporary CI_PR_<id> schema and
+# reads unchanged parents from the target environment (--defer). The schema is dropped at
+# the end of every run, pass or fail.
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-24.04
+
+variables:
+  - template: templates/variables.yml
+    parameters:
+      # PR target branch; falls back to dev for manual runs.
+      branch: ${{ replace(coalesce(variables['System.PullRequest.TargetBranch'], 'refs/heads/dev'), 'refs/heads/', '') }}
+
+stages:
+  - stage: Validate
+    displayName: dbt PR validation
+    jobs:
+      - job: dbt_ci
+        displayName: dbt CI
+        steps:
+          - checkout: self
+            displayName: Checkout
+          - template: templates/install-python-tools.yml
+          - template: templates/download-snowflake-key.yml
+            parameters:
+              secureFile: snowflake_pr_key.p8
+          - script: |
+              set -euo pipefail
+              [[ "${PR_NUMBER}" =~ ^[0-9]+$ ]] || { echo "dbt CI must run from a pull request (PR id '${PR_NUMBER}')"; exit 1; }
+              cd dbt
+              dbt deps
+              rc=0
+              bash ./scripts/fetch_state.sh "${TARGET_ENV}" || rc=$?
+              case "${rc}" in
+                0)  SELECT_ARGS=(--select "state:modified+" --defer --state ./state) ;;
+                10) echo "No state for ${TARGET_ENV} yet: building everything"; SELECT_ARGS=() ;;
+                *)  echo "fetch_state.sh failed with exit code ${rc}"; exit "${rc}" ;;
+              esac
+              dbt build --target ci "${SELECT_ARGS[@]}"
+            displayName: dbt build changed models into CI_PR schema
+            env:
+              DBT_TARGET: ci
+              TARGET_ENV: $(TARGET_ENV)
+              PR_NUMBER: $(System.PullRequest.PullRequestId)
+              RUN_ID: $(Build.BuildId)
+              SNOW_BIN: $(SNOW_BIN)
+              SNOWFLAKE_ACCOUNT: $(SNOWFLAKE_ACCOUNT)
+              SNOWFLAKE_USER: $(SNOWFLAKE_PR_USER)
+              SNOWFLAKE_KEY_PATH: $(sfkey.secureFilePath)
+              SNOWFLAKE_ROLE: $(SNOWFLAKE_PR_ROLE)
+              SNOWFLAKE_WAREHOUSE: $(SNOWFLAKE_WAREHOUSE)
+              SNOWFLAKE_DATABASE: $(SNOWFLAKE_DATABASE)
+          - script: |
+              set -euo pipefail
+              cd dbt
+              bash ./scripts/drop_pr_schema.sh "${PR_NUMBER}"
+            displayName: Drop CI_PR schema
+            condition: and(always(), ne(variables['System.PullRequest.PullRequestId'], ''))
+            env:
+              PR_NUMBER: $(System.PullRequest.PullRequestId)
+              RUN_ID: $(Build.BuildId)
+              SNOW_BIN: $(SNOW_BIN)
+              SNOWFLAKE_ACCOUNT: $(SNOWFLAKE_ACCOUNT)
+              SNOWFLAKE_USER: $(SNOWFLAKE_PR_USER)
+              SNOWFLAKE_KEY_PATH: $(sfkey.secureFilePath)
+              SNOWFLAKE_ROLE: $(SNOWFLAKE_PR_ROLE)
+              SNOWFLAKE_WAREHOUSE: $(SNOWFLAKE_WAREHOUSE)
+              SNOWFLAKE_DATABASE: $(SNOWFLAKE_DATABASE)

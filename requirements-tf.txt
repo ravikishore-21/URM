@@ -1,0 +1,4 @@
+# Terraform policy scanner. Installed in its own virtual environment by
+# pipelines/scripts/install_tf_tools.sh, never together with requirements.txt:
+# checkov pins many libraries that overlap with dbt.
+checkov==3.3.29

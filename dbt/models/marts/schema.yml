@@ -1,0 +1,19 @@
+version: 2
+
+models:
+  - name: fct_customer_orders
+    description: One row per customer with completed-order totals. Table, so Phase 3 backups apply to it.
+    columns:
+      - name: customer_id
+        description: Customer key.
+        data_tests:
+          - unique
+          - not_null
+      - name: number_of_orders
+        description: Count of completed orders (0 when the customer has none).
+        data_tests:
+          - not_null
+      - name: lifetime_value
+        description: Sum of completed order amounts (0 when the customer has none).
+        data_tests:
+          - not_null

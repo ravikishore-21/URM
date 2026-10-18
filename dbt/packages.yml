@@ -1,0 +1,5 @@
+# No external packages yet. Keep the file so `dbt deps` succeeds in pipelines.
+# Add packages with an exact version, for example:
+#   - package: dbt-labs/dbt_utils
+#     version: 1.3.0
+packages: []

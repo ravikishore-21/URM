@@ -1,0 +1,12 @@
+# Main toolchain (Python 3.11). Exact versions, resolved together with pip.
+# snowflake-cli is NOT here: it hard-pins click/protobuf/etc. and conflicts with
+# dbt-core. Install it separately from requirements-cli.txt (see README).
+dbt-core==1.11.16
+dbt-snowflake==1.11.6
+snowflake-connector-python==4.8.0
+pytest==9.1.1
+ruff==0.17.1
+sqlfluff==4.4.0
+sqlfluff-templater-dbt==4.4.0
+checkov==3.3.29
+pre-commit==4.7.0

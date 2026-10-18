@@ -1,0 +1,19 @@
+version: 2
+
+seeds:
+  - name: raw_customers
+    description: Sample customer records loaded from CSV. Demo data so the pipeline has something to deploy.
+    columns:
+      - name: id
+        description: Customer key.
+        data_tests:
+          - unique
+          - not_null
+  - name: raw_orders
+    description: Sample order records loaded from CSV. Demo data so the pipeline has something to deploy.
+    columns:
+      - name: id
+        description: Order key.
+        data_tests:
+          - unique
+          - not_null

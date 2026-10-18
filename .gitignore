@@ -1,0 +1,44 @@
+# dbt
+dbt/target/
+target/
+dbt_packages/
+logs/
+state/
+changed_models.txt
+.user.yml
+
+# Terraform
+.terraform/
+.terraform.lock.hcl.bak
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+tfplan
+*.tfplan
+
+# Secrets
+*.p8
+*.pem
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+.venv-cli/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Pipeline tool cache and plan output
+.tools/
+plan-output/

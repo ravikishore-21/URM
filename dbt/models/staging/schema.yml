@@ -1,0 +1,27 @@
+version: 2
+
+models:
+  - name: stg_customers
+    description: One row per customer, with columns renamed from the raw seed.
+    columns:
+      - name: customer_id
+        description: Customer key.
+        data_tests:
+          - unique
+          - not_null
+  - name: stg_orders
+    description: One row per order, with columns renamed from the raw seed.
+    columns:
+      - name: order_id
+        description: Order key.
+        data_tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: Customer who placed the order.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_customers')
+                field: customer_id

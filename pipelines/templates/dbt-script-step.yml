@@ -1,0 +1,38 @@
+# One bash step that runs dbt scripts with the Snowflake settings of the current environment.
+# Used by dbt-deploy.yml so the env block exists once. The job must already have run
+# install-python-tools.yml and download-snowflake-key.yml (the key step must be named sfkey).
+# Secrets and the key path reach the script through env: only.
+parameters:
+  - name: displayName
+    type: string
+  - name: script
+    type: string
+  - name: stepName
+    type: string
+    default: ''
+  - name: allowFullBuild
+    type: boolean
+    default: false
+  - name: condition
+    type: string
+    default: succeeded()
+
+steps:
+  - script: ${{ parameters.script }}
+    displayName: ${{ parameters.displayName }}
+    condition: ${{ parameters.condition }}
+    ${{ if ne(parameters.stepName, '') }}:
+      name: ${{ parameters.stepName }}
+    env:
+      TARGET_ENV: $(TARGET_ENV)
+      RUN_ID: $(Build.BuildId)
+      ALLOW_FULL_BUILD: ${{ parameters.allowFullBuild }}
+      COMMIT_SHA: $(Build.SourceVersion)
+      COMMIT_MESSAGE: $(Build.SourceVersionMessage)
+      SNOW_BIN: $(SNOW_BIN)
+      SNOWFLAKE_ACCOUNT: $(SNOWFLAKE_ACCOUNT)
+      SNOWFLAKE_USER: $(SNOWFLAKE_USER)
+      SNOWFLAKE_KEY_PATH: $(sfkey.secureFilePath)
+      SNOWFLAKE_ROLE: $(SNOWFLAKE_ROLE)
+      SNOWFLAKE_WAREHOUSE: $(SNOWFLAKE_WAREHOUSE)
+      SNOWFLAKE_DATABASE: $(SNOWFLAKE_DATABASE)

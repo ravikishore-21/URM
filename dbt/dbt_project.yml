@@ -1,0 +1,21 @@
+name: snowflake_cicd
+version: "1.0.0"
+config-version: 2
+profile: snowflake
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+# No schema override in model configs on purpose: the schema comes from the profile
+# (ANALYTICS, or CI_PR_<n> for the ci target). state:modified compares the unrendered
+# config, so a different target schema does not mark every model as modified.
+models:
+  snowflake_cicd:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table
